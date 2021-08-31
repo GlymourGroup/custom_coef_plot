@@ -1,0 +1,450 @@
+---
+title: "How to Make Custom Coefficient Plots"
+author: "Kaitlin Swinnerton"
+date: "8/30/2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: paper
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This file will walk you through how to make a custom coefficient plot. It will utilize nested dataframes to fit many models efficiently, and broom::tidy to convert model output into tidy dataframes. These techniques aren't the focus on the presentation, but they are great tools to use and I would recommend trying them!
+
+Import libraries
+
+```{r libraries, warning=FALSE, message=FALSE}
+# load libraries
+if (!require("pacman")){
+  install.packages("pacman", repos='http://cran.us.r-project.org')
+}
+library(pacman)
+p_load(
+  # tidyverse packages
+  "plyr", "tidyverse", "broom", "glue","modelr", 
+  # data set
+  "gapminder"
+  )
+
+```
+
+
+# Step 1: Fit models
+
+I'll be following steps from the "Many Models" example in [R for Data Science](https://r4ds.had.co.nz/many-models.html) to fit many models on the `gapminder` dataset. I will then show how to take the results from those models and display the coeffiecients in a custom coefficient plot.
+
+
+First, we'll take a look at the data
+```{r}
+gapminder
+```
+
+We're going to investigate how life expectancy (`lifeExp`) changes over time (`year`) for each country (`country`).
+
+We'll begin by creating a nested dataframe grouped by `country` and `continent`. This will make it easier to fit many models at once.
+
+```{r}
+by_country <- gapminder %>% 
+  group_by(country, continent) %>% 
+  nest()
+
+by_country
+
+```
+
+Next, we'll define a model-fitting function and apply it to every dataframe within `by_country`
+
+```{r}
+# function that regresses year on life expectancy
+country_model <- function(df) {
+  lm(lifeExp ~ year, data = df)
+}
+
+# create a new column in the nested dataframe with the fitted models
+by_country <- by_country %>% 
+  mutate(model = map(data, country_model))
+
+by_country
+
+```
+
+Convert fitted model objects into tidy data frames with confidence intervals. We will end up with a dataframe with estimates, standard errors, test statistics, p values, and confidence intervals for each term for each model.
+
+```{r}
+
+mods <- by_country %>% 
+  mutate(tidy_model = map(model, ~tidy(.x, conf.int = TRUE))) %>% 
+  unnest(tidy_model)
+
+mods
+
+```
+
+
+# Plot results 
+
+Now, we can use this dataframe to make our coefficient plots. We will be comparing the beta coeffiecient for `year` by country by continent.
+
+First, we'll look at countries in the Americas.
+
+To make the plot, we will first filter the dataframe to include only the continent and term of interest. Then we will construct the plot itself. Our coefficient plot will show the point estimates with 95% confidence intervals on the x-axis and the country names on the y-axis. To construct this using ggplot, we will need to included the following geom:  
+* `geom_point` for the point estimate  
+* `geom_errorbarh` for the confidence intervals  
+* `geom_vline` for the reference line (0)
+
+
+```{r}
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  ggplot(aes(x = estimate, y = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) 
+
+```
+
+From here, there are several aesthetic adjustments we might want to make. We may want to do any of the following:  
+* Add a title or rename axis labels  
+* Make the countries easier to distinguish by adding color to the plot  
+* Reorder the y-axis so the countries are in alphabetical order from top to bottom  
+* Reorder the plot based on the magnitude of the point estimate  
+* Change other basic aesthetics of the plot (e.g. background color, color scale)
+
+We will go through these adjustments a few at a time. **Note** I will be doing a lot of copying and pasting of code. I DO NOT RECCOMEND DOING THIS NORMALLY. In fact, you should avoid this at all costs (but that is a topic for another code-skills seminar). I am doing this to hopefully make it easier to see when/where I'm making adjustments each time. 
+
+
+## Add/edit titles and axis labels
+```{r}
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  ggplot(aes(x = estimate, y = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # NEW: add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Effect of year on life expectancy by country"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("")
+
+```
+
+## Add color to plot
+
+```{r}
+
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # NEW: set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Effect of year on life expectancy by country"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("")
+
+```
+
+Now we have this unnecessary legend. Remove from plot.
+
+```{r}
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Effect of year on life expectancy by country"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # NEW: remove legend
+  theme(legend.position = "none")
+
+```
+
+## Change plot theme
+
+If you're like me, you really dislike R's default "gray" background. Luckily, ggplot comes with several different "themes" you can use.
+
+```{r}
+# using theme_bw
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_bw"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # NEW: set plot theme - must happen above any other changes to the theme
+  theme_bw() +
+  # remove legend
+  theme(legend.position = "none") 
+
+# using theme_classic
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_classic"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # NEW: set plot theme - must happen above any other changes to the theme
+  theme_classic() +
+  # remove legend
+  theme(legend.position = "none") 
+
+# using theme_minimal
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0
+  geom_vline(aes(xintercept = 0)) +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_minimal"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # NEW: set plot theme - must happen above any other changes to the theme
+  theme_minimal() +
+  # remove legend
+  theme(legend.position = "none") 
+  
+
+```
+
+I personally want a combination of theme_classic and theme_minimal (dark, solid x and y axis with light gridlines). I also want to change the look of the reference line so it is dashed and not as dark. I will manually make those adjustments.
+
+```{r}
+
+# using theme_minimal
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0 NEW: make gray and dashed
+  geom_vline(aes(xintercept = 0), color = "grey50", lty = "dashed") +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_minimal + axis lines"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # set plot theme - must happen above any other changes to the theme
+  theme_minimal() +
+  # remove legend
+  theme(
+    legend.position = "none",
+    # NEW: add back axis lines
+    axis.line = element_line()
+    ) 
+
+```
+
+## Re-order y-axis by coefficient magnitude
+
+```{r}
+
+# NEW: get rank order
+country_rnk <- mods %>%
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  arrange(desc(estimate)) %>% 
+  pull(country)
+
+
+# using theme_minimal
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # NEW: make country a factor ordered by estimate magnitude
+  mutate(country = factor(country, levels = country_rnk)) %>% 
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0 NEW: make gray and dashed
+  geom_vline(aes(xintercept = 0), color = "grey50", lty = "dashed") +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_minimal + axis lines"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # set plot theme - must happen above any other changes to the theme
+  theme_minimal() +
+  # remove legend
+  theme(
+    legend.position = "none",
+    # NEW: add back axis lines
+    axis.line = element_line()
+    ) 
+
+
+```
+
+Now that the points are in rank order, we could change the color palette to match the sequential nature of the data. I am a fan of the [viridis](https://cran.r-project.org/web/packages/viridis/vignettes/intro-to-viridis.html) color palettes. They are designed to be color-blind friendly and perceptually uniform, and they are, in my opinion, quite pretty. They're also conveniently built into ggplot2.
+
+## Manually change the color palette
+
+```{r}
+  
+# filter dataframe
+mods %>% 
+  filter(
+    continent == "Americas",
+    term == "year"
+    ) %>%
+  # NEW: make country a factor ordered by estimate magnitude
+  mutate(country = factor(country, levels = country_rnk)) %>% 
+  # several elements of the plot will be used by multiple geoms
+  # set those within the ggplot() call at the top to pass to each geom
+  # set color to country
+  ggplot(aes(x = estimate, y = country, color = country)) +
+  # plot the point estimate
+  geom_point() + 
+  # plot the confidence intervals
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  # add reference line at x=0 NEW: make gray and dashed
+  geom_vline(aes(xintercept = 0), color = "grey50", lty = "dashed") +
+  # NEW: set color palette
+  scale_color_viridis_d() +
+  # add/edit title and axis labels
+  labs(
+    title = "Change in life expectancy over time",
+    subtitle = "Using theme: theme_minimal + axis lines"
+  ) +
+  xlab("Beta coefficient") +
+  ylab("") +
+  # set plot theme - must happen above any other changes to the theme
+  theme_minimal() +
+  # remove legend
+  theme(
+    legend.position = "none",
+    # NEW: add back axis lines
+    axis.line = element_line()
+    ) 
+
+  
+
+```
+
+
